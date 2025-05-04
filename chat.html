@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chatbot</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            animation: gradient 15s ease infinite;
+            background: linear-gradient(-45deg, #3b82f6, #8b5cf6, #ec4899, #22d3ee);
+            background-size: 400% 400%;
+        }
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .chat-container {
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            background: #f9fafb;
+            border-radius: 10px;
+        }
+        .doctor-message {
+            background-color: #10b981;
+            color: white;
+            border-radius: 15px 15px 15px 0;
+            margin-right: 20%;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            max-width: 70%;
+        }
+        .patient-message {
+            background-color: #3b82f6;
+            color: white;
+            border-radius: 15px 15px 0 15px;
+            margin-left: 20%;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            max-width: 70%;
+        }
+        .timestamp {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center">
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-3xl transform transition-all">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-3xl font-bold text-gray-800">Chatbot</h2>
+            <a href="{{ url_for('logout') }}" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition transform hover:scale-105">Logout</a>
+        </div>
+        {% if error %}
+            <p class="text-red-500 text-center mb-4">{{ error }}</p>
+        {% endif %}
+        <div class="chat-container" id="chat-container">
+            {% for msg in conversation %}
+                <div class="{% if msg.role == 'doctor' %}doctor-message{% else %}patient-message{% endif %}">
+                    <div>{{ msg.content }}</div>
+                    <div class="timestamp">{{ msg.timestamp }}</div>
+                </div>
+            {% endfor %}
+        </div>
+        <form id="chat-form" method="POST" enctype="multipart/form-data" class="space-y-4 mt-6">
+            <div>
+                <label class="block text-gray-700 font-medium">Doctor: Speak or Type</label>
+                <div class="flex space-x-2 items-center">
+                    <button type="button" id="start-recording" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition transform hover:scale-105">Record</button>
+                    <button type="button" id="stop-recording" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition transform hover:scale-105 hidden">Stop</button>
+                    <span id="recording-status" class="text-gray-600 hidden">Recording...</span>
+                    <span id="processing-status" class="text-gray-600 hidden">Processing...</span>
+                </div>
+                <input type="hidden" name="audio_data" id="audio-data">
+                <input type="text" name="text_input" id="text-input" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mt-2" placeholder="Or type the doctor's question...">
+            </div>
+            <button type="submit" id="send-button" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition transform hover:scale-105">Submit</button>
+        </form>
+        {% if mcq_options %}
+            <div class="mt-6" id="mcq-container">
+                <h4 class="text-lg font-semibold text-gray-800">Patient: Choose an option</h4>
+                <form id="mcq-form" method="POST" class="space-y-3">
+                    {% for option in mcq_options %}
+                        <button type="submit" name="mcq_option" value="{{ option }}" class="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition transform hover:scale-105 mcq-button">{{ option }}</button>
+                    {% endfor %}
+                </form>
+            </div>
+        {% endif %}
+        {% if audio %}
+            <audio id="response-audio" controls class="mt-4 w-full">
+                <source src="{{ url_for('static', filename='output.mp3') }}?t={{ response | timestamp }}" type="audio/mp3">
+            </audio>
+        {% endif %}
+    </div>
+    <script>
+        let recorder;
+        let audioChunks = [];
+        let startTime;
+
+        const startButton = document.getElementById('start-recording');
+        const stopButton = document.getElementById('stop-recording');
+        const recordingStatus = document.getElementById('recording-status');
+        const processingStatus = document.getElementById('processing-status');
+        const audioDataInput = document.getElementById('audio-data');
+        const chatContainer = document.getElementById('chat-container');
+        const form = document.getElementById('chat-form');
+        const sendButton = document.getElementById('send-button');
+        const textInput = document.getElementById('text-input');
+        const mcqForm = document.getElementById('mcq-form');
+        const responseAudio = document.getElementById('response-audio');
+
+        startButton.addEventListener('click', async () => {
+            try {
+                textInput.value = ''; // Clear text input
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('Microphone access granted');
+                recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+                audioChunks = [];
+                startTime = Date.now();
+                recorder.ondataavailable = e => {
+                    audioChunks.push(e.data);
+                    console.log('Audio chunk received, size:', e.data.size);
+                };
+                recorder.onstop = () => {
+                    const duration = (Date.now() - startTime) / 1000;
+                    console.log('Recorder stopped, total chunks:', audioChunks.length, 'duration:', duration, 'seconds');
+                    if (duration < 1) {
+                        alert('Recording too short. Please record for at least 1 second.');
+                        recordingStatus.classList.add('hidden');
+                        startButton.classList.remove('hidden');
+                        stopButton.classList.add('hidden');
+                        return;
+                    }
+                    const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                    console.log('Blob created, size:', blob.size);
+                    const reader = new FileReader();
+                    reader.readAsDataURL(blob);
+                    reader.onloadend = () => {
+                        audioDataInput.value = reader.result;
+                        console.log('Audio data encoded, length:', reader.result.length);
+                        recordingStatus.classList.add('hidden');
+                        processingStatus.classList.remove('hidden');
+                        sendButton.click(); // Auto-submit form
+                    };
+                };
+                recorder.start();
+                console.log('Recording started');
+                startButton.classList.add('hidden');
+                stopButton.classList.remove('hidden');
+                recordingStatus.classList.remove('hidden');
+                processingStatus.classList.add('hidden');
+            } catch (err) {
+                console.error('Microphone access error:', err.name, err.message);
+                let errorMsg = 'Microphone access failed. Please ensure microphone is enabled in browser settings and try again.';
+                if (err.name === 'NotAllowedError') {
+                    errorMsg = 'Microphone permission denied. Please allow microphone access in your browser settings.';
+                } else if (err.name === 'NotReadableError') {
+                    errorMsg = 'Microphone is in use or unavailable. Please check your microphone and try again.';
+                }
+                alert(errorMsg);
+                recordingStatus.classList.add('hidden');
+                startButton.classList.remove('hidden');
+                stopButton.classList.add('hidden');
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            if (recorder) {
+                recorder.stop();
+                console.log('Stop button clicked');
+                startButton.classList.remove('hidden');
+                stopButton.classList.add('hidden');
+                recordingStatus.classList.add('hidden');
+            }
+        });
+
+        form.addEventListener('submit', () => {
+            console.log('Form submitting');
+            processingStatus.classList.remove('hidden');
+            sendButton.disabled = true;
+        });
+
+        // Auto-play audio when MCQ is selected
+        if (mcqForm) {
+            const mcqButtons = document.querySelectorAll('.mcq-button');
+            mcqButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    console.log('MCQ button clicked:', button.value);
+                    processingStatus.classList.remove('hidden');
+                });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            processingStatus.classList.add('hidden');
+            sendButton.disabled = false;
+            console.log('Page loaded');
+            // Auto-play audio if present
+            if (responseAudio) {
+                responseAudio.play().catch(err => {
+                    console.error('Auto-play failed:', err);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
