@@ -24,7 +24,7 @@ def timestamp_filter(value):
 app.jinja_env.filters['timestamp'] = timestamp_filter
 
 # Set Google API key for Gemini
-genai.configure(api_key="AIzaSyAWXDcBnKDOMoynAGuEaFRgf7LBRt5Z27g")
+genai.configure(api_key="")
 
 # Log credentials path
 logging.debug("GOOGLE_APPLICATION_CREDENTIALS: %s", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
